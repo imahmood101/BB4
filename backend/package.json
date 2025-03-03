@@ -1,0 +1,48 @@
+{
+  "name": "sales-dashboard-backend",
+  "version": "0.1.0",
+  "description": "Backend for the Sales Dashboard Platform",
+  "type": "module",
+  "scripts": {
+    "dev": "nodemon --exec tsx src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "lint": "eslint . --ext .ts",
+    "format": "prettier --write \"src/**/*.ts\"",
+    "type-check": "tsc --noEmit",
+    "migrate": "tsx src/scripts/migrate.ts"
+  },
+  "keywords": ["sales", "dashboard", "api"],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@libsql/client": "^0.14.0",
+    "@types/bcryptjs": "^2.4.6",
+    "@types/cors": "^2.8.17",
+    "@types/express": "^5.0.0",
+    "@types/express-session": "^1.18.1",
+    "@types/node": "^22.13.9",
+    "@types/passport": "^1.0.17",
+    "@types/passport-local": "^1.0.38",
+    "bcryptjs": "^3.0.2",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "drizzle-orm": "^0.40.0",
+    "express": "^4.21.2",
+    "express-session": "^1.18.1",
+    "express-validator": "^7.2.1",
+    "passport": "^0.7.0",
+    "passport-local": "^1.0.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.8.2",
+    "zod": "^3.24.2"
+  },
+  "devDependencies": {
+    "@typescript-eslint/eslint-plugin": "^8.26.0",
+    "@typescript-eslint/parser": "^8.26.0",
+    "eslint": "^9.21.0",
+    "nodemon": "^3.1.9",
+    "prettier": "^3.5.3",
+    "tsx": "^4.19.3"
+  }
+}
