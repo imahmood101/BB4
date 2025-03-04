@@ -1,47 +1,59 @@
 import { Request, Response } from 'express';
 import { z } from 'zod';
 import { AuthService } from '../services/auth.service.js';
+import { hashPassword, validatePassword, validatePasswordStrength } from '../utils/password.utils.js';
+import { generateToken, generateRefreshToken } from '../utils/jwt.utils.js';
+import { AppError } from '../middleware/error.middleware.js';
 
 const loginSchema = z.object({
   email: z.string().email(),
-  password: z.string().min(6),
+  password: z.string().min(1),
 });
 
 const registerSchema = z.object({
   email: z.string().email(),
-  password: z.string().min(6),
+  password: z.string().min(1),
   firstName: z.string().min(2),
   lastName: z.string().min(2),
   role: z.enum(['admin', 'manager', 'sales_rep']).default('sales_rep'),
 });
 
 export class AuthController {
-  static async login(req: Request, res: Response) {
+  static async login(req: Request, res: Response): Promise<void> {
     try {
       const { email, password } = loginSchema.parse(req.body);
       const user = await AuthService.findUserByEmail(email);
 
       if (!user) {
-        return res.status(401).json({ message: 'Invalid credentials' });
+        throw new AppError(401, 'Invalid credentials');
       }
 
-      const isValidPassword = await AuthService.validatePassword(password, user.password);
+      const isValidPassword = await validatePassword(password, user.password);
       if (!isValidPassword) {
-        return res.status(401).json({ message: 'Invalid credentials' });
+        throw new AppError(401, 'Invalid credentials');
       }
 
       if (user.status !== 'active') {
-        return res.status(403).json({ message: 'Account is not active' });
+        throw new AppError(403, 'Account is not active');
       }
 
-      // Set user in session
-      req.session.user = {
+      // Generate tokens
+      const accessToken = generateToken({
         id: user.id,
         email: user.email,
         role: user.role,
-      };
+      });
+      const refreshToken = generateRefreshToken();
 
-      return res.json({
+      // Set refresh token in HTTP-only cookie
+      res.cookie('refreshToken', refreshToken, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'strict',
+        maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+      });
+
+      res.json({
         message: 'Login successful',
         user: {
           id: user.id,
@@ -50,26 +62,57 @@ export class AuthController {
           lastName: user.lastName,
           role: user.role,
         },
+        accessToken,
       });
     } catch (error) {
       if (error instanceof z.ZodError) {
-        return res.status(400).json({ message: 'Validation error', errors: error.errors });
+        throw new AppError(400, 'Validation error', true);
       }
-      return res.status(500).json({ message: 'Internal server error' });
+      if (error instanceof AppError) {
+        throw error;
+      }
+      throw new AppError(500, 'Internal server error');
     }
   }
 
-  static async register(req: Request, res: Response) {
+  static async register(req: Request, res: Response): Promise<void> {
     try {
       const userData = registerSchema.parse(req.body);
       const existingUser = await AuthService.findUserByEmail(userData.email);
 
       if (existingUser) {
-        return res.status(400).json({ message: 'Email already registered' });
+        throw new AppError(400, 'Email already registered');
       }
 
-      const user = await AuthService.createUser(userData);
-      return res.status(201).json({
+      // Validate password strength
+      validatePasswordStrength(userData.password);
+
+      // Hash password
+      const hashedPassword = await hashPassword(userData.password);
+
+      // Create user with hashed password
+      const user = await AuthService.createUser({
+        ...userData,
+        password: hashedPassword,
+      });
+
+      // Generate tokens
+      const accessToken = generateToken({
+        id: user.id,
+        email: user.email,
+        role: user.role,
+      });
+      const refreshToken = generateRefreshToken();
+
+      // Set refresh token in HTTP-only cookie
+      res.cookie('refreshToken', refreshToken, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'strict',
+        maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+      });
+
+      res.status(201).json({
         message: 'Registration successful',
         user: {
           id: user.id,
@@ -78,21 +121,64 @@ export class AuthController {
           lastName: user.lastName,
           role: user.role,
         },
+        accessToken,
       });
     } catch (error) {
       if (error instanceof z.ZodError) {
-        return res.status(400).json({ message: 'Validation error', errors: error.errors });
+        throw new AppError(400, 'Validation error', true);
       }
-      return res.status(500).json({ message: 'Internal server error' });
+      if (error instanceof AppError) {
+        throw error;
+      }
+      throw new AppError(500, 'Internal server error');
     }
   }
 
-  static async logout(req: Request, res: Response) {
-    req.session.destroy((err) => {
-      if (err) {
-        return res.status(500).json({ message: 'Error logging out' });
-      }
-      return res.json({ message: 'Logged out successfully' });
+  static async logout(req: Request, res: Response): Promise<void> {
+    // Clear refresh token cookie
+    res.clearCookie('refreshToken', {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'strict',
+      maxAge: 0,
+    });
+
+    res.json({ message: 'Logged out successfully' });
+  }
+
+  static async refreshToken(req: Request, res: Response): Promise<void> {
+    const refreshToken = req.cookies.refreshToken;
+
+    if (!refreshToken) {
+      throw new AppError(401, 'Refresh token not found');
+    }
+
+    // Verify refresh token
+    const isValid = verifyRefreshToken(refreshToken);
+    if (!isValid) {
+      throw new AppError(401, 'Invalid refresh token');
+    }
+
+    // Get user from session
+    if (!req.session.user) {
+      throw new AppError(401, 'User session not found');
+    }
+
+    // Generate new tokens
+    const accessToken = generateToken(req.session.user);
+    const newRefreshToken = generateRefreshToken();
+
+    // Set new refresh token in HTTP-only cookie
+    res.cookie('refreshToken', newRefreshToken, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'strict',
+      maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+    });
+
+    res.json({
+      message: 'Token refreshed successfully',
+      accessToken,
     });
   }
 } 
