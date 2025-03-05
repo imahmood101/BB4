@@ -1,0 +1,53 @@
+version: '3.8'
+
+services:
+  backend:
+    build: 
+      context: ./backend
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=development
+      - PORT=3000
+      - DATABASE_URL=libsql://bb-irfann.aws-eu-west-3.turso.io
+      - DATABASE_AUTH_TOKEN=${DATABASE_AUTH_TOKEN}
+      - SESSION_SECRET=${SESSION_SECRET}
+      - SESSION_COOKIE_SECURE=false
+      - SESSION_COOKIE_HTTPONLY=true
+      - CORS_ORIGIN=http://localhost:5173
+      - JWT_SECRET=${JWT_SECRET}
+      - JWT_EXPIRES_IN=24h
+    volumes:
+      - ./backend:/app
+      - /app/node_modules
+    depends_on:
+      - db
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "5173:5173"
+    environment:
+      - VITE_API_URL=http://localhost:3000
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    depends_on:
+      - backend
+
+  db:
+    image: postgres:16-alpine
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=sales_dashboard
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+volumes:
+  postgres_data: 
